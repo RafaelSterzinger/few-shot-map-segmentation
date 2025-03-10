@@ -93,3 +93,22 @@ def print_trainable_parameters(model):
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
     )
+    
+    return {'trainable': trainable_params, 'all': all_param, 'trainable%': 100 * trainable_params / all_param}
+
+class EarlyStopping:
+    def __init__(self, patience=5, min_delta=0.005):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_score = None
+        self.counter = 0
+
+    def __call__(self, val_score):
+        if self.best_score is None or val_score > self.best_score + self.min_delta:
+            self.best_score = val_score
+            self.counter = 0  # Reset counter
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True  # Trigger early stopping
+        return False

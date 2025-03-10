@@ -7,8 +7,11 @@ def get_lora_model(base_model_name):
     base_model = AutoModel.from_pretrained(base_model_name, trust_remote_code=True)
     if 'sam' in base_model_name:
         base_model = base_model.vision_encoder
+    target_modules = ["qkv", "proj"]
+    if 'dino' in base_model_name:
+        target_modules = ["query", "key", "value", "dense"]
     lora_config = LoraConfig(
         r=2, lora_alpha=16, lora_dropout=0.3, 
-        target_modules=["qkv", "proj"], bias="none"
+        target_modules=target_modules, bias="none"
     )
     return get_peft_model(base_model, lora_config)

@@ -9,16 +9,23 @@ import albumentations as A
 
 
 class DatasetSiegfried(Dataset):
-    def __init__(self, datapath, transform, split, nshots):
+    def __init__(self, datapath, transform, split, nshots, is_unet=False):
         print('Loading data from %s' % datapath)
         self.split = split
         self.benchmark = 'maps_siegfried'
         self.base_path = datapath
         self.transform = transform
+        self.is_unet = is_unet
 
         self.img_metadata = self.build_img_metadata(self.split)
 
         if split == 'train':
+            if type(nshots) is str:
+                if '.' in nshots:
+                    nshots = float(nshots)
+                else:
+                    nshots = int(nshots)
+            
             if type(nshots) is float:
                 self.img_metadata = random.sample(
                     self.img_metadata, round(len(self.img_metadata) * nshots))
@@ -26,8 +33,6 @@ class DatasetSiegfried(Dataset):
             elif type(nshots) is int:
                 self.img_metadata = random.sample(self.img_metadata, nshots)
                 print(f'Training with {nshots} samples')
-            else:
-                raise RuntimeError
 
             self.augmentations = A.Compose([
                     A.D4(),
@@ -42,7 +47,10 @@ class DatasetSiegfried(Dataset):
         query_img, query_mask, query_name = self.load_frame(idx)
 
         #query_mask = query_mask.float()
-        query_img = self.transform(query_img)['pixel_values'][0]
+        if self.is_unet:
+            query_img = self.transform(query_img)
+        else:
+            query_img = self.transform(query_img)['pixel_values'][0]
 
         batch = {'img': query_img,
                  'mask': query_mask,
@@ -81,8 +89,8 @@ class DatasetSiegfried(Dataset):
         query_mask = np.array(Image.open(os.path.join(
             self.base_path, 'annotation', self.split, query_name + '.tif')).convert('RGB'))
 
-        transform = self.augmentations(image=query_img, mask=query_mask)
-        query_img, query_mask = transform['image'], transform['mask']
+        augment = self.augmentations(image=query_img, mask=query_mask)
+        query_img, query_mask = augment['image'], augment['mask']
 
         query_img = Image.fromarray(query_img)
 
