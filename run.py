@@ -144,11 +144,12 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     args = parser.parse_args()
 
-    fix_randseed(args.seed)
 
     wandb.disabled = not args.exp_name
     random_string = ''.join(random.choices(string.ascii_lowercase, k=4))
     wandb.init(entity='rafael-sterzinger', project='few_shot_map_seg', id=f"{args.exp_name}_{random_string}" if args.exp_name else None)
+
+    fix_randseed(args.seed)
 
     log_info(args)
     wandb.config.update(args)
