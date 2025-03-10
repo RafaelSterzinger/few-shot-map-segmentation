@@ -1,3 +1,6 @@
+import copy
+import random
+import string
 import torch
 import torch.optim as optim
 import torchvision
@@ -16,10 +19,11 @@ from util import calculate_iou, calculate_objective, fix_randseed, log_info, pri
 
 BASE_MODEL_DICT = {
     'dino' : 'facebook/dinov2-large',
-    'radio' : 'nvidia/RADIO-H',
+    'radio' : 'nvidia/RADIO-L', #'nvidia/RADIO-H',
     'sam' : 'facebook/sam-vit-large',
     'apple' : 'apple/aimv2-large-patch14-224'
 }
+
 
 
 def run_epoch(model, dataloader, optimizer, scale_factor = 1):
@@ -54,6 +58,9 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
                 pred = model(img)
                 loss = calculate_objective(pred, mask)
                 loss.backward()
+
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  
+
                 optimizer.step()
             else:
                 with torch.no_grad():  # No gradient calculation during validation/testing
@@ -69,7 +76,7 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
 def experiment(args):
     if 'unet' not in args.base_model:
         base_model_path = BASE_MODEL_DICT[args.base_model]
-        base_model = get_lora_model(base_model_path)
+        base_model = get_lora_model(base_model_path, args.adapter)
         model = SegmentationHead(base_model, args.base_model).cuda()
         preprocessor = AutoImageProcessor.from_pretrained(base_model_path)
     else:
@@ -88,14 +95,17 @@ def experiment(args):
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.01)
 
     early_stopping = EarlyStopping(patience=10, min_delta=0.005)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, threshold=0.005)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, threshold=0.005)
+
+    best_model = None
+    best_iou = 0
 
     for epoch in range(args.epochs):
         train_loss, train_iou, train_f1 = run_epoch(model, dl_train, optimizer, args.scale_factor)
         wandb.log({"epoch": epoch + 1, "train_loss": train_loss, "train_miou": train_iou, "train_f1": train_f1})
         print(f"Epoch {epoch}, Loss: {train_loss:.4f}, mIoU: {train_iou:.4f}, F1: {train_f1:.4f}")
         val_loss, val_iou, val_f1 = run_epoch(model, dl_val, None, args.scale_factor)
-        wandb.log({"epoch": epoch + 1, "val_loss": val_iou, "val_miou": val_iou, "val_f1": val_f1})
+        wandb.log({"epoch": epoch + 1, "val_loss": val_loss, "val_miou": val_iou, "val_f1": val_f1})
         print(f"VALIDATION: Loss: {val_loss:.4f}, mIoU: {val_iou:.4f}, F1: {val_f1:.4f}")
         # Reduce LR if validation IoU plateaus
         scheduler.step(val_iou)
@@ -104,6 +114,12 @@ def experiment(args):
         if early_stopping(val_iou):
             print("Early stopping triggered.")
             break
+
+        if best_model is None or best_iou < val_iou:
+            best_iou = val_iou
+            best_model = copy.deepcopy(model.state_dict())
+    
+    model.load_state_dict(best_model)
 
     test_loss, test_iou, test_f1 = run_epoch(model, dl_test, None, args.scale_factor)
     wandb.log({"test_loss": test_loss, "test_miou": test_iou, "test_f1": test_f1})
@@ -115,22 +131,24 @@ def experiment(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard'], help="Chose railways or vineyards")
+    parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'boft', 'none'], help="Low-rank adaptation methods")
     parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio', 'apple', 'unet'])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--exp_name", type=str, default='')
-    parser.add_argument("--nshots", default=10)
+    parser.add_argument("--nshots", default=1.0)
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--cutmix', action='store_true')
     parser.add_argument("--scale_factor", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for training")
-    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     args = parser.parse_args()
 
     fix_randseed(args.seed)
 
     wandb.disabled = not args.exp_name
-    wandb.init(entity='rafael-sterzinger', project='few_shot_map_seg', id=args.exp_name if args.exp_name else None)
+    random_string = ''.join(random.choices(string.ascii_lowercase, k=4))
+    wandb.init(entity='rafael-sterzinger', project='few_shot_map_seg', id=f"{args.exp_name}_{random_string}" if args.exp_name else None)
 
     log_info(args)
     wandb.config.update(args)
