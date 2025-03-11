@@ -41,7 +41,7 @@ class DatasetSiegfried(Dataset):
             self.augmentations = A.Compose([A.NoOp()])
 
     def __len__(self):
-        return max(len(self.img_metadata), 1024)
+        return len(self.img_metadata)
 
     def __getitem__(self, idx):
         query_img, query_mask, query_name = self.load_frame(idx)

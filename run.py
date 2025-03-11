@@ -38,6 +38,12 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
         else:
             model.eval()  # Set model to evaluation mode
 
+
+        if type(model) is Unet:
+                f = model
+                model = lambda x: f(x).squeeze(1)
+
+
         # Loop over the current dataloader
         nsamples = 0
 
@@ -49,17 +55,16 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
 
             nsamples += img.shape[0]
 
-            if type(model) is Unet:
-                f = model
-                model = lambda x: f(x).squeeze(1)
-
             if is_train:
                 optimizer.zero_grad()  # Zero out the gradients during training
                 pred = model(img)
                 loss = calculate_objective(pred, mask)
                 loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  
+                if type(f) is Unet:
+                    torch.nn.utils.clip_grad_norm_(f.parameters(), max_norm=1.0)  
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  
 
                 optimizer.step()
             else:

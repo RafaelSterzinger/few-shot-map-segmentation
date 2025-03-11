@@ -46,6 +46,6 @@ def build_dataloader(args, transformer, use_mixup=False, use_cutmix=False):
         for split in ['train', 'val', 'test']:
                 dataset = DatasetSiegfried(datapath, transformer, split, args.nshots, is_unet=True if args.base_model == 'unet' else False)
                 is_train = split == 'train'
-                dataloaders.append(DataLoader(dataset, batch_size=args.batch_size if is_train else args.batch_size*2, shuffle=is_train, num_workers=8, drop_last=is_train, collate_fn=collate_fn if is_train else default_collate))
+                dataloaders.append(DataLoader(dataset, batch_size=args.batch_size if is_train else args.batch_size*2, shuffle=is_train, num_workers=8, drop_last=False, collate_fn=collate_fn if is_train else default_collate))
 
         return dataloaders
