@@ -1,3 +1,7 @@
+import os
+os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 import copy
 import random
 import string
@@ -11,7 +15,7 @@ from tqdm import tqdm
 from transformers import AutoImageProcessor
 from data.dataset import build_dataloader
 from model.encoder import get_lora_model
-from model.segmentation_head import SegmentationHead
+from model.decoder import SegmentationHead
 import wandb
 import argparse
 
@@ -38,7 +42,7 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
         else:
             model.eval()  # Set model to evaluation mode
 
-
+        f = None
         if type(model) is Unet:
                 f = model
                 model = lambda x: f(x).squeeze(1)
@@ -50,7 +54,8 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
         for batch in tqdm(dataloader):
             batch = to_cuda(batch)
             img = batch['img']
-            img = torchvision.transforms.functional.resize(img, [s*scale_factor for s in img.shape[-2:]],torchvision.transforms.InterpolationMode.BICUBIC, antialias=True)
+            if not f and model.enc_name != "sam" and model.enc_name != "apple":
+                img = torchvision.transforms.functional.resize(img, [s*scale_factor for s in img.shape[-2:]],torchvision.transforms.InterpolationMode.BICUBIC, antialias=True)
             mask = batch['mask']
 
             nsamples += img.shape[0]
@@ -61,14 +66,10 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
                 loss = calculate_objective(pred, mask)
                 loss.backward()
 
-                if type(f) is Unet:
-                    torch.nn.utils.clip_grad_norm_(f.parameters(), max_norm=1.0)  
-                else:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  
-
                 optimizer.step()
             else:
                 with torch.no_grad():  # No gradient calculation during validation/testing
+                    #pca = model.visualize_pca(img)
                     pred = model(img)
                     loss = calculate_objective(pred, mask)
 
@@ -81,7 +82,7 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
 def experiment(args):
     if 'unet' not in args.base_model:
         base_model_path = BASE_MODEL_DICT[args.base_model]
-        base_model = get_lora_model(base_model_path, args.adapter)
+        base_model = get_lora_model(base_model_path, args.adapter, type(args.nshots) is int)
         model = SegmentationHead(base_model, args.base_model).cuda()
         preprocessor = AutoImageProcessor.from_pretrained(base_model_path)
     else:
@@ -97,10 +98,7 @@ def experiment(args):
     wandb.config.update(param_infos)
 
     dl_train, dl_val, dl_test = build_dataloader(args, preprocessor, args.mixup, args.cutmix)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.01)
-
-    early_stopping = EarlyStopping(patience=10, min_delta=0.005)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, threshold=0.005)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.01)
 
     best_model = None
     best_iou = 0
@@ -109,16 +107,11 @@ def experiment(args):
         train_loss, train_iou, train_f1 = run_epoch(model, dl_train, optimizer, args.scale_factor)
         wandb.log({"epoch": epoch + 1, "train_loss": train_loss, "train_miou": train_iou, "train_f1": train_f1})
         print(f"Epoch {epoch}, Loss: {train_loss:.4f}, mIoU: {train_iou:.4f}, F1: {train_f1:.4f}")
-        val_loss, val_iou, val_f1 = run_epoch(model, dl_val, None, args.scale_factor)
-        wandb.log({"epoch": epoch + 1, "val_loss": val_loss, "val_miou": val_iou, "val_f1": val_f1})
-        print(f"VALIDATION: Loss: {val_loss:.4f}, mIoU: {val_iou:.4f}, F1: {val_f1:.4f}")
-        # Reduce LR if validation IoU plateaus
-        scheduler.step(val_iou)
+        if epoch % 10 == 0 or args.nshots != 20:
+            val_loss, val_iou, val_f1 = run_epoch(model, dl_val, None, args.scale_factor)
+            wandb.log({"epoch": epoch + 1, "val_loss": val_loss, "val_miou": val_iou, "val_f1": val_f1})
+            print(f"VALIDATION: Loss: {val_loss:.4f}, mIoU: {val_iou:.4f}, F1: {val_f1:.4f}")
 
-        # Check early stopping (higher IoU is better)
-        if early_stopping(val_iou):
-            print("Early stopping triggered.")
-            break
 
         if best_model is None or best_iou < val_iou:
             best_iou = val_iou
@@ -136,7 +129,7 @@ def experiment(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard'], help="Chose railways or vineyards")
-    parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'boft', 'none'], help="Low-rank adaptation methods")
+    parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'dora', 'none'], help="Low-rank adaptation methods")
     parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio', 'apple', 'unet'])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--exp_name", type=str, default='')
@@ -144,15 +137,21 @@ if __name__ == "__main__":
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--cutmix', action='store_true')
     parser.add_argument("--scale_factor", type=int, default=1)
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     args = parser.parse_args()
 
+    if type(args.nshots) is str:
+        if '.' in args.nshots:
+            args.nshots = float(args.nshots)
+        else:
+            args.nshots = int(args.nshots)
 
-    wandb.disabled = not args.exp_name
+    os.environ['WANDB_SILENT']="true" if not args.exp_name else "false"
     random_string = ''.join(random.choices(string.ascii_lowercase, k=4))
-    wandb.init(entity='rafael-sterzinger', project='few_shot_map_seg', id=f"{args.exp_name}_{random_string}" if args.exp_name else None)
+    id = f"{args.exp_name}_{random_string}"
+    wandb.init(entity='rafael-sterzinger', project='few_shot_map_seg', id=id if args.exp_name else None)
 
     fix_randseed(args.seed)
 

@@ -20,12 +20,14 @@ def get_lora_model(base_model_name, peft_name, fsl = False):
     PEFT_DICT = PEFT_DICT_FSL if fsl else PEFT_DICT_N
     
     base_model = AutoModel.from_pretrained(base_model_name, trust_remote_code=True)
+
+    if 'sam' in base_model_name:
+        base_model = base_model.vision_encoder
     if peft_name == 'none':
         for param in base_model.parameters():
             param.requires_grad = False
         return base_model
-    if 'sam' in base_model_name:
-        base_model = base_model.vision_encoder
+
     target_modules = ["qkv", "proj"]
     if 'dino' in base_model_name:
         target_modules = ["query", "key", "value", "dense"]
