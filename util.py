@@ -47,12 +47,43 @@ def calculate_objective(pred, target):
 
             # Compute BCE Loss
             bce_loss = F.binary_cross_entropy(pred, target)
-            bce_weight = 0.7
+            lambda_weight = 0.2
+
+            _focal_loss = focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean')
 
             # Combine both losses
-            loss = bce_weight * bce_loss + (1 - bce_weight) * dice_loss
+            loss = lambda_weight * _focal_loss + (1 - lambda_weight) * dice_loss
             return loss
 
+def focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean'):
+    """
+    Computes the focal loss between pred and target.
+    
+    Args:
+        pred (Tensor): Predicted probabilities with shape (B, H, W) or (B, 1, H, W).
+        target (Tensor): Ground truth binary labels with same shape as pred.
+        alpha (float): Balancing factor.
+        gamma (float): Focusing parameter.
+        reduction (str): Reduction method ('mean' or 'sum').
+    
+    Returns:
+        Tensor: Computed focal loss.
+    """
+    # Compute binary cross entropy loss without reduction
+    bce_loss = F.binary_cross_entropy(pred, target, reduction='none')
+    
+    # Compute p_t (the probability of the true class)
+    pt = torch.exp(-bce_loss)
+    
+    # Compute focal loss
+    loss = alpha * (1 - pt) ** gamma * bce_loss
+    
+    if reduction == 'mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
+    else:
+        return loss
 
 def fix_randseed(seed):
     r""" Set random seeds for reproducibility """

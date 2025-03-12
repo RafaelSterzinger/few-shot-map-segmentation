@@ -20,12 +20,6 @@ class DatasetSiegfried(Dataset):
         self.img_metadata = self.build_img_metadata(self.split)
 
         if split == 'train':
-            if type(nshots) is str:
-                if '.' in nshots:
-                    nshots = float(nshots)
-                else:
-                    nshots = int(nshots)
-            
             if type(nshots) is float:
                 self.img_metadata = random.sample(
                     self.img_metadata, round(len(self.img_metadata) * nshots))
