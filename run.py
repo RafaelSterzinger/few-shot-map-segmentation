@@ -23,14 +23,15 @@ from util import calculate_iou, calculate_objective, fix_randseed, log_info, pri
 
 BASE_MODEL_DICT = {
     'dino' : 'facebook/dinov2-large',
-    'radio' : 'nvidia/RADIO-L', #'nvidia/RADIO-H',
+    'radio_l' : 'nvidia/RADIO-L',
+    'radio_h' : 'nvidia/RADIO-H',
     'sam' : 'facebook/sam-vit-large',
     'apple' : 'apple/aimv2-large-patch14-224'
 }
 
 
 
-def run_epoch(model, dataloader, optimizer, scale_factor = 1):
+def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1):
         # Function to handle training and evaluation
         total_loss = total_iou = total_F1 = 0
 
@@ -66,7 +67,13 @@ def run_epoch(model, dataloader, optimizer, scale_factor = 1):
                 loss = calculate_objective(pred, mask)
                 loss.backward()
 
+                if type(f) is Unet:
+                    torch.nn.utils.clip_grad_norm_(f.parameters(), max_norm=1.0)  
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  
+
                 optimizer.step()
+                scheduler.step()
             else:
                 with torch.no_grad():  # No gradient calculation during validation/testing
                     #pca = model.visualize_pca(img)
@@ -98,17 +105,20 @@ def experiment(args):
     wandb.config.update(param_infos)
 
     dl_train, dl_val, dl_test = build_dataloader(args, preprocessor, args.mixup, args.cutmix)
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr/10, betas=(0.9, 0.999), weight_decay=0.01)
+
+    # One-Cycle LR scheduler
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=args.lr, epochs=args.epochs, steps_per_epoch=len(dl_train))
 
     best_model = None
     best_iou = 0
 
     for epoch in range(args.epochs):
-        train_loss, train_iou, train_f1 = run_epoch(model, dl_train, optimizer, args.scale_factor)
+        train_loss, train_iou, train_f1 = run_epoch(model, dl_train, optimizer, scheduler, args.scale_factor)
         wandb.log({"epoch": epoch + 1, "train_loss": train_loss, "train_miou": train_iou, "train_f1": train_f1})
         print(f"Epoch {epoch}, Loss: {train_loss:.4f}, mIoU: {train_iou:.4f}, F1: {train_f1:.4f}")
-        if epoch % 10 == 0 or args.nshots != 20:
-            val_loss, val_iou, val_f1 = run_epoch(model, dl_val, None, args.scale_factor)
+        if epoch % 10 == 0 or args.nshots != 10:
+            val_loss, val_iou, val_f1 = run_epoch(model, dl_val, None, None, args.scale_factor)
             wandb.log({"epoch": epoch + 1, "val_loss": val_loss, "val_miou": val_iou, "val_f1": val_f1})
             print(f"VALIDATION: Loss: {val_loss:.4f}, mIoU: {val_iou:.4f}, F1: {val_f1:.4f}")
 
@@ -119,7 +129,7 @@ def experiment(args):
     
     model.load_state_dict(best_model)
 
-    test_loss, test_iou, test_f1 = run_epoch(model, dl_test, None, args.scale_factor)
+    test_loss, test_iou, test_f1 = run_epoch(model, dl_test, None, None, args.scale_factor)
     wandb.log({"test_loss": test_loss, "test_miou": test_iou, "test_f1": test_f1})
     print(f"TESTING: Loss: {test_loss:.4f}, mIoU: {test_iou:.4f}, F1: {test_f1:.4f}")
     wandb.finish()
@@ -128,9 +138,9 @@ def experiment(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard'], help="Chose railways or vineyards")
+    parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard', 'icdar'], help="Chose railways or vineyards")
     parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'dora', 'none'], help="Low-rank adaptation methods")
-    parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio', 'apple', 'unet'])
+    parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio_l', 'radio_h', 'apple', 'unet'])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--exp_name", type=str, default='')
     parser.add_argument("--nshots", default=1.0)

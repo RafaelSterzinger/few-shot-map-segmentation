@@ -46,13 +46,13 @@ def calculate_objective(pred, target):
             dice_loss = 1 - (2. * intersection + EPS) / (pred.flatten().sum() + target.flatten().sum() + EPS)
 
             # Compute BCE Loss
-            bce_loss = F.binary_cross_entropy(pred, target)
-            lambda_weight = 0.2
+            # bce_loss = F.binary_cross_entropy(pred, target)
+            # lambda_weight = 0.2
 
             _focal_loss = focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean')
 
             # Combine both losses
-            loss = lambda_weight * _focal_loss + (1 - lambda_weight) * dice_loss
+            loss = 10 * _focal_loss + dice_loss
             return loss
 
 def focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean'):

@@ -6,7 +6,8 @@ import torch.nn as nn
 import torch
 
 INPUT_CHANNELS = {
-    'radio' : 1280,
+    'radio_l' : 1024,
+    'radio_h' : 1280,
     'dino' : 1024,
     'sam' : 256,
     'apple' : 1024
@@ -19,7 +20,7 @@ class SegmentationHead(nn.Module):
         self.encoder = encoder
         self.enc_name = enc_name
         self.seg_head = nn.Sequential(
-            nn.Conv2d(INPUT_CHANNELS[enc_name], 1, kernel_size=1, padding=1),
+            nn.Conv2d(INPUT_CHANNELS[enc_name], 1, kernel_size=1),
         )
         self.upsample = nn.Upsample(224, mode='bilinear', align_corners=True)
     
@@ -29,12 +30,12 @@ class SegmentationHead(nn.Module):
         return torch.sigmoid(logits)
     
     def decode_batch(self, x):
-        x = self.seg_head(x)
         x = self.upsample(x)
+        x = self.seg_head(x)
         return x
 
     def encode_batch(self, x):
-        if self.enc_name == 'radio':
+        if 'radio' in self.enc_name:
             features = self.encoder(x).features
         elif self.enc_name == 'dino':
             features = self.encoder(x).last_hidden_state[:,1:,:]

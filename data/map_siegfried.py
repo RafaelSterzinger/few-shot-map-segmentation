@@ -38,17 +38,16 @@ class DatasetSiegfried(Dataset):
         return len(self.img_metadata)
 
     def __getitem__(self, idx):
-        query_img, query_mask, query_name = self.load_frame(idx)
+        image, mask, name = self.load_frame(idx)
 
-        #query_mask = query_mask.float()
         if self.is_unet:
-            query_img = self.transform(query_img)
+            image = self.transform(image)
         else:
-            query_img = self.transform(query_img)['pixel_values'][0]
+            image = self.transform(image)['pixel_values'][0]
 
-        batch = {'img': query_img,
-                 'mask': query_mask,
-                 'name': query_name,
+        batch = {'img': image,
+                 'mask': mask,
+                 'name': name,
                  }
 
         return batch
@@ -75,7 +74,6 @@ class DatasetSiegfried(Dataset):
         return query_mask_binary
 
     def load_frame(self, idx):
-        idx = idx % self.img_metadata.__len__()
         query_name = self.img_metadata[idx]
 
         query_img = np.array(Image.open(os.path.join(
