@@ -1,5 +1,6 @@
 import os
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+import cv2
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 import copy
@@ -16,6 +17,7 @@ from transformers import AutoImageProcessor
 from data.dataset import build_dataloader
 from model.encoder import get_lora_model
 from model.decoder import SegmentationHead
+from patchify import unpatchify
 import wandb
 import argparse
 
@@ -31,7 +33,7 @@ BASE_MODEL_DICT = {
 
 
 
-def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1):
+def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_results = False):
         # Function to handle training and evaluation
         total_loss = total_iou = total_F1 = 0
 
@@ -51,6 +53,9 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1):
 
         # Loop over the current dataloader
         nsamples = 0
+
+        if args.class_name == "icdar":
+            preds = []
 
         for batch in tqdm(dataloader):
             batch = to_cuda(batch)
@@ -78,11 +83,43 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1):
                 with torch.no_grad():  # No gradient calculation during validation/testing
                     #pca = model.visualize_pca(img)
                     pred = model(img)
+                    if save_results:
+                        for i in range(img.shape[0]):
+                            torchvision.utils.save_image((pred[i]>=0.5).float(), f'out/{batch["name"][i]}_{args.nshots}_pred.png')
+                    if args.class_name == "icdar":
+                        temp_pred = torchvision.transforms.functional.resize(pred, [s*2 for s in pred.shape[-2:]],torchvision.transforms.InterpolationMode.BILINEAR)
+                        preds.append(temp_pred.cpu().numpy())
                     loss = calculate_objective(pred, mask)
 
             total_loss += loss.item()
             total_iou += calculate_iou(pred, mask)
             total_F1 += calculate_f1(pred, mask)[0]
+        
+        if args.class_name == "icdar" and (dataloader.dataset.split == "val" or dataloader.dataset.split == "test"):
+            import numpy as np
+            preds = np.stack(preds, axis=0)
+            images = []
+            start_idx = dataloader.dataset.start_indices
+            for i in range(len(start_idx)-1):
+                images.append(preds[start_idx[i]:start_idx[i+1]])
+            for i, img in enumerate(images):
+                name = dataloader.dataset.images[i]['name']
+                shape = dataloader.dataset.images[i]['patch_shape']
+                orig_shape = dataloader.dataset.images[i]['orig_size']
+                frame_mask = dataloader.dataset.images[i]['frame_mask']
+                PH,PW, H,W, _ = shape
+                image = img.reshape(PH, PW, H, W)
+                image_with_padding = unpatchify(image, (PH*H, PW*W))
+                image_with_frame = image_with_padding[0:orig_shape[0],0:orig_shape[1]]
+                image = image_with_frame * (frame_mask/255)
+                cv2.imwrite(f'out/icdar_100/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
+                cv2.imwrite(f'out/icdar_100/{name}_soft.png', (image*255).astype(np.uint8))
+
+
+
+
+            
+            
         
         return total_loss/nsamples, total_iou/nsamples, total_F1/nsamples
 
@@ -129,9 +166,11 @@ def experiment(args):
     
     model.load_state_dict(best_model)
 
-    test_loss, test_iou, test_f1 = run_epoch(model, dl_test, None, None, args.scale_factor)
+    test_loss, test_iou, test_f1 = run_epoch(model, dl_test, None, None, args.scale_factor, args.save_results)
     wandb.log({"test_loss": test_loss, "test_miou": test_iou, "test_f1": test_f1})
     print(f"TESTING: Loss: {test_loss:.4f}, mIoU: {test_iou:.4f}, F1: {test_f1:.4f}")
+
+    torch.save(best_model, f'checkpoint/{args.class_name}_{args.base_model}_{args.adapter}_{args.nshots}_{args.exp_name}.pth')
     wandb.finish()
 
 
@@ -146,8 +185,9 @@ if __name__ == "__main__":
     parser.add_argument("--nshots", default=1.0)
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--cutmix', action='store_true')
+    parser.add_argument('--save_results', action='store_true')
     parser.add_argument("--scale_factor", type=int, default=1)
-    parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=300, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     args = parser.parse_args()

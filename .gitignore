@@ -1,3 +1,4 @@
 *.pyc
 wandb
 .vscode
+out

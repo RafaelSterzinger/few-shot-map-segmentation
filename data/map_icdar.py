@@ -39,7 +39,7 @@ class DatasetICDAR(Dataset):
                 new_size = None
                 patch_shape = None
                 for key,value in self.images[i].items(): 
-                    if key == 'patch_size' or key == 'orig_size' or key == 'frame_mask':
+                    if key not in ['input', 'gt']:
                         continue
                     value = transform(image=value)['image']
                     if new_size is None:
@@ -70,7 +70,7 @@ class DatasetICDAR(Dataset):
         raise IndexError("Global index out of range")
 
     def __len__(self):
-        return 64 if self.split == 'train' else self.length
+        return 160 if self.split == 'train' else self.length
 
     def __getitem__(self, idx):
         image, mask, name = self.load_frame(idx)
@@ -99,6 +99,7 @@ class DatasetICDAR(Dataset):
         for img in img_metadata:
             img_dict = {}
             base_path = os.path.join(self.base_path, split)
+            img_dict['name'] = img
             img_dict['input'] = np.array(Image.open(os.path.join(base_path, img + '-INPUT.jpg')).convert('RGB'))
             img_dict['frame_mask'] = np.array(Image.open(os.path.join(base_path, img + '-INPUT-MASK.png')).convert('L'))
             img_dict['gt'] = np.array(Image.open(os.path.join(base_path, img + '-OUTPUT-GT.png')).convert('L'))
