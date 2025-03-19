@@ -23,11 +23,12 @@ class DatasetICDAR(Dataset):
 
         assert nshots == 1.0
 
-        patch_size = 448
+        scaling = 2
+        patch_size = 224*scaling
         if split == 'train':
             self.augmentations = A.Compose([
                     A.CropNonEmptyMaskIfExists(patch_size, patch_size),
-                    A.Resize(patch_size//2, patch_size//2),
+                    A.Resize(patch_size//scaling, patch_size//scaling),
                     A.D4()
                 ])
         else:
@@ -58,7 +59,7 @@ class DatasetICDAR(Dataset):
                 self.length += len(lst['input'])
 
             self.augmentations = A.Compose([
-                        A.Resize(patch_size//2, patch_size//2),
+                        A.Resize(patch_size//scaling, patch_size//scaling),
                     ])
 
     def global_to_local(self, global_index):
@@ -70,7 +71,7 @@ class DatasetICDAR(Dataset):
         raise IndexError("Global index out of range")
 
     def __len__(self):
-        return 160 if self.split == 'train' else self.length
+        return 64 if self.split == 'train' else self.length
 
     def __getitem__(self, idx):
         image, mask, name = self.load_frame(idx)
