@@ -10,6 +10,10 @@ from data.map_icdar import DatasetICDAR
 from data.map_siegfried import DatasetSiegfried
 from torch.utils.data import default_collate
 
+from data.text_icdar import DatasetTextICDAR
+
+PATH_DICT = {'latin1' : 'Latin14396', 'latin2' : 'Latin2', 'syr' : 'Syr341'}
+
 def build_dataloader(args, transformer, use_mixup=False, use_cutmix=False):
         dataloaders = [] 
 
@@ -46,6 +50,11 @@ def build_dataloader(args, transformer, use_mixup=False, use_cutmix=False):
                 if args.class_name == 'icdar':
                     path = os.path.join('/data/databases', f'maps/maps_icdar/1-detbblocks')
                     dataset = DatasetICDAR(path, transformer, split, args.nshots, is_unet=True if args.base_model == 'unet' else False)
+                elif args.class_name in ['latin1', 'latin2', 'syr']:
+                    if split == 'test':
+                         split = 'val'
+                    path = os.path.join('/data/databases', f'maps/text_icdar/{PATH_DICT[args.class_name]}')
+                    dataset = DatasetTextICDAR(path, transformer, split, args.nshots, is_unet=True if args.base_model == 'unet' else False)
                 else:
                     if args.nshots == 10 and split != 'test' and args.seed == 42:
                         path = os.path.join('/data/databases', f'maps/maps_siegfried/dataset_{args.class_name}/fewshot10')

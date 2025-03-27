@@ -54,7 +54,9 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
         # Loop over the current dataloader
         nsamples = 0
 
-        if args.class_name == "icdar":
+        benchmark = dataloader.dataset.benchmark
+
+        if benchmark in ["text_icdar", "maps_icdar"]:
             preds = []
 
         for batch in tqdm(dataloader):
@@ -86,7 +88,8 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                     if save_results:
                         for i in range(img.shape[0]):
                             torchvision.utils.save_image((pred[i]>=0.5).float(), f'out/{batch["name"][i]}_{args.nshots}_pred.png')
-                    if args.class_name == "icdar":
+
+                    if benchmark in ["text_icdar", "maps_icdar"]:
                         temp_pred = torchvision.transforms.functional.resize(pred, [s*2 for s in pred.shape[-2:]],torchvision.transforms.InterpolationMode.BILINEAR)
                         preds.append(temp_pred.cpu().numpy())
                     loss = calculate_objective(pred, mask)
@@ -95,7 +98,7 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
             total_iou += calculate_iou(pred, mask)
             total_F1 += calculate_f1(pred, mask)[0]
         
-        if args.class_name == "icdar" and (dataloader.dataset.split == "val" or dataloader.dataset.split == "test"):
+        if benchmark in ["text_icdar", "maps_icdar"] and (dataloader.dataset.split == "val" or dataloader.dataset.split == "test"):
             import numpy as np
             preds = np.concatenate(preds, axis=0)
             images = []
@@ -106,14 +109,19 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                 name = dataloader.dataset.images[i]['name']
                 shape = dataloader.dataset.images[i]['patch_shape']
                 orig_shape = dataloader.dataset.images[i]['orig_size']
-                frame_mask = dataloader.dataset.images[i]['frame_mask']
+                if benchmark == "text_icdar":
+                    frame_mask = np.ones((orig_shape[0], orig_shape[1]))*255
+                else:
+                    frame_mask = dataloader.dataset.images[i]['frame_mask']
                 PH,PW, H,W, _ = shape
                 image = img.reshape(PH, PW, H, W)
                 image_with_padding = unpatchify(image, (PH*H, PW*W))
                 image_with_frame = image_with_padding[0:orig_shape[0],0:orig_shape[1]]
                 image = image_with_frame * (frame_mask/255)
-                cv2.imwrite(f'out/icdar/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
-                cv2.imwrite(f'out/icdar/{name}_soft.png', (image*255).astype(np.uint8))
+                if not os.path.exists(f'out/{benchmark}'):
+                    os.makedirs(f'out/{benchmark}')
+                cv2.imwrite(f'out/{benchmark}/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
+                cv2.imwrite(f'out/{benchmark}/{name}_soft.png', (image*255).astype(np.uint8))
         
         return total_loss/nsamples, total_iou/nsamples, total_F1/nsamples
 
@@ -171,7 +179,7 @@ def experiment(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard', 'icdar'], help="Chose railways or vineyards")
+    parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard', 'icdar', 'latin1', 'latin2', 'syr'], help="Chose railways or vineyards")
     parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'dora', 'none'], help="Low-rank adaptation methods")
     parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio_l', 'radio_h', 'apple', 'unet'])
     parser.add_argument("--seed", type=int, default=42)
