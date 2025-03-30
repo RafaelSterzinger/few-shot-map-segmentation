@@ -12,12 +12,18 @@ SPLIT_DICT = {
     'val': 'validation',
 }
 
+SCALING = 2
+SIZE = 224*SCALING
+
 class DatasetTextICDAR(Dataset):
     def __init__(self, datapath, transform, split, nshots = 1.0, is_unet=False):
         print('Loading data from %s' % datapath)
-        self.split = split
+        if split == 'test':
+            self.split = 'val'
+        else:
+            self.split = split
 
-        assert split in ['train', 'val']
+        assert self.split in ['train', 'val']
 
         self.benchmark = 'text_icdar'
         self.base_path = datapath
@@ -25,22 +31,22 @@ class DatasetTextICDAR(Dataset):
         self.transform = transform
         self.is_unet = is_unet
         self.images = self.load_images(self.split)
+#        if split == 'val': 
+#            self.images = self.images[0:3]
+#            print(f"reduce validation set to {len(self.images)} images")
 
         assert nshots == 1.0
 
-        scaling = 2
-        patch_size = 224*scaling
-        if split == 'train':
+        if self.split == 'train':
             self.augmentations = A.Compose([
                     A.Affine(scale=(1,1), translate_percent=0, rotate=(5,-5), shear=(3,-3), p=1.0),
-                    A.CropNonEmptyMaskIfExists(patch_size, patch_size),
-                    A.Resize(patch_size//scaling, patch_size//scaling),
+                    A.RandomCrop(SIZE, SIZE, p=1),
                 ])
         else:
             for i in range(len(self.images)):
                 orig_size = self.images[i]['orig_size']
                 transform = A.Compose([
-                    A.PadIfNeeded(min_height=patch_size*(ceil(orig_size[0]/patch_size)), min_width=patch_size*(ceil(orig_size[1]/patch_size)), border_mode=0),  
+                    A.PadIfNeeded(min_height=SIZE*(ceil(orig_size[0]/SIZE)), min_width=SIZE*(ceil(orig_size[1]/SIZE)), border_mode=0, position='top_left'),  
                 ])
                 new_size = None
                 patch_shape = None
@@ -50,7 +56,7 @@ class DatasetTextICDAR(Dataset):
                     value = transform(image=value)['image']
                     if new_size is None:
                         new_size = value.shape
-                    self.images[i][key] = patchify(value, (patch_size,patch_size, 3) if key == 'input' else (patch_size,patch_size), step=patch_size)
+                    self.images[i][key] = patchify(value, (SIZE,SIZE, 3) if key == 'input' else (SIZE,SIZE), step=SIZE//2)
                     shape = self.images[i][key].squeeze().shape
                     if patch_shape is None:
                         patch_shape = shape
@@ -63,8 +69,7 @@ class DatasetTextICDAR(Dataset):
                 self.start_indices.append(self.start_indices[-1] + len(lst['input']))
                 self.length += len(lst['input'])
 
-            self.augmentations = A.Compose([
-                        A.Resize(patch_size//scaling, patch_size//scaling),
+            self.augmentations = A.Compose([A.NoOp()
                     ])
 
     def global_to_local(self, global_index):
@@ -124,7 +129,7 @@ class DatasetTextICDAR(Dataset):
 
     def load_frame(self, idx):
         if self.split == 'train':
-            query_img, query_mask = self.images[0]['input'], self.images[0]['gt']
+            query_img, query_mask = self.images[idx%len(self.images)]['input'], self.images[idx%len(self.images)]['gt']
             query_name = 'train'
         else:
             list_idx, idx = self.global_to_local(idx)

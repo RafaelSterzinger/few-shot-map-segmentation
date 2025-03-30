@@ -22,7 +22,7 @@ class SegmentationHead(nn.Module):
         self.seg_head = nn.Sequential(
             nn.Conv2d(INPUT_CHANNELS[enc_name], 1, kernel_size=1),
         )
-        self.upsample = nn.Upsample(224, mode='bilinear', align_corners=True)
+        self.upsample = nn.Upsample(224*2, mode='bilinear', align_corners=True)
     
     def forward(self, x):
         features = self.encode_batch(x)
