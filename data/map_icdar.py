@@ -35,7 +35,7 @@ class DatasetICDAR(Dataset):
             for i in range(len(self.images)):
                 orig_size = self.images[i]['orig_size']
                 transform = A.Compose([
-                    A.PadIfNeeded(min_height=patch_size*(ceil(orig_size[0]/patch_size)), min_width=patch_size*(ceil(orig_size[1]/patch_size)), border_mode=0),  
+                    A.PadIfNeeded(min_height=patch_size*(ceil(orig_size[0]/patch_size)), min_width=patch_size*(ceil(orig_size[1]/patch_size)), border_mode=0, position='top_left'),  
                 ])
                 new_size = None
                 patch_shape = None

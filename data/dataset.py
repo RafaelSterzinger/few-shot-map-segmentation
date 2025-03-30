@@ -51,8 +51,6 @@ def build_dataloader(args, transformer, use_mixup=False, use_cutmix=False):
                     path = os.path.join('/data/databases', f'maps/maps_icdar/1-detbblocks')
                     dataset = DatasetICDAR(path, transformer, split, args.nshots, is_unet=True if args.base_model == 'unet' else False)
                 elif args.class_name in ['latin1', 'latin2', 'syr']:
-                    if split == 'test':
-                         split = 'val'
                     path = os.path.join('/data/databases', f'maps/text_icdar/{PATH_DICT[args.class_name]}')
                     dataset = DatasetTextICDAR(path, transformer, split, args.nshots, is_unet=True if args.base_model == 'unet' else False)
                 else:
