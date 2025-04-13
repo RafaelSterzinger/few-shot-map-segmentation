@@ -15,6 +15,32 @@ SPLIT_DICT = {
 SCALING = 2
 SIZE = 224*SCALING
 
+class AddDistanceToCenterChannel(A.ImageOnlyTransform):
+    def __init__(self, always_apply=False, p=1.0):
+        super(AddDistanceToCenterChannel, self).__init__(always_apply, p)
+
+    def apply(self, img, **params):
+        H, W = img.shape[:2]
+        
+        # Create normalized coordinate grid
+        y_coords = np.linspace(0, 1, H).reshape(H, 1).repeat(W, axis=1)
+        x_coords = np.linspace(0, 1, W).reshape(1, W).repeat(H, axis=0)
+
+        # Compute distance to center
+        dist = np.sqrt((x_coords - 0.5) ** 2 + (y_coords - 0.5) ** 2)
+        dist /= np.sqrt(0.5 ** 2 + 0.5 ** 2)  # Normalize to [0, 1]
+
+        dist = dist.astype(np.float32)
+
+        # Add new channel
+        if img.ndim == 2:
+            img = img[..., np.newaxis]
+
+        dist = dist[..., np.newaxis]  # shape: (H, W, 1)
+        img_with_dist = np.concatenate((img, dist), axis=-1)  # shape: (H, W, C+1)
+
+        return img_with_dist
+
 class DatasetTextICDAR(Dataset):
     def __init__(self, datapath, transform, split, nshots = 1.0, is_unet=False):
         print('Loading data from %s' % datapath)
@@ -39,14 +65,16 @@ class DatasetTextICDAR(Dataset):
 
         if self.split == 'train':
             self.augmentations = A.Compose([
+                    #AddDistanceToCenterChannel(),
                     A.Affine(scale=(1,1), translate_percent=0, rotate=(5,-5), shear=(3,-3), p=1.0),
                     A.RandomCrop(SIZE, SIZE, p=1),
                 ])
         else:
+            STEP = SIZE//4
             for i in range(len(self.images)):
                 orig_size = self.images[i]['orig_size']
                 transform = A.Compose([
-                    A.PadIfNeeded(min_height=SIZE*(ceil(orig_size[0]/SIZE)), min_width=SIZE*(ceil(orig_size[1]/SIZE)), border_mode=0, position='top_left'),  
+                    A.PadIfNeeded(min_height=STEP*(ceil(orig_size[0]/STEP)), min_width=STEP*(ceil(orig_size[1]/STEP)), border_mode=0, position='top_left'),  
                 ])
                 new_size = None
                 patch_shape = None
@@ -56,7 +84,7 @@ class DatasetTextICDAR(Dataset):
                     value = transform(image=value)['image']
                     if new_size is None:
                         new_size = value.shape
-                    self.images[i][key] = patchify(value, (SIZE,SIZE, 3) if key == 'input' else (SIZE,SIZE), step=SIZE//2)
+                    self.images[i][key] = patchify(value, (SIZE,SIZE, 3) if key == 'input' else (SIZE,SIZE), step=STEP)
                     shape = self.images[i][key].squeeze().shape
                     if patch_shape is None:
                         patch_shape = shape
