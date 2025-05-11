@@ -52,7 +52,7 @@ def calculate_objective(pred, target):
             _focal_loss = focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean')
 
             # Combine both losses
-            loss = 10 * _focal_loss + dice_loss
+            loss = dice_loss #10 * _focal_loss + dice_loss
             return loss
 
 def focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean'):

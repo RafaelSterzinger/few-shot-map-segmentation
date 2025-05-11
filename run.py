@@ -27,6 +27,7 @@ BASE_MODEL_DICT = {
     'dino' : 'facebook/dinov2-large',
     'radio_l' : 'nvidia/RADIO-L',
     'radio_h' : 'nvidia/RADIO-H',
+    'radio_b' : 'nvidia/RADIO-B',
     'sam' : 'facebook/sam-vit-large',
     'apple' : 'apple/aimv2-large-patch14-224'
 }
@@ -63,7 +64,7 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
             batch = to_cuda(batch)
             img = batch['img']
             if not f and model.enc_name != "sam" and model.enc_name != "apple":
-                img = torchvision.transforms.functional.resize(img, [s*scale_factor for s in img.shape[-2:]],torchvision.transforms.InterpolationMode.BICUBIC, antialias=True)
+                img = torchvision.transforms.functional.resize(img, [s*scale_factor for s in img.shape[-2:]],torchvision.transforms.InterpolationMode.BICUBIC)
             mask = batch['mask']
 
             nsamples += img.shape[0]
@@ -90,13 +91,13 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                             torchvision.utils.save_image((pred[i]>=0.5).float(), f'out/{batch["name"][i]}_{args.nshots}_pred.png')
 
                     if benchmark in ["text_icdar", "maps_icdar"]:
-                        temp_pred = torchvision.transforms.functional.resize(pred, [s*2 for s in pred.shape[-2:]],torchvision.transforms.InterpolationMode.BILINEAR)
-                        preds.append(temp_pred.cpu().numpy())
+                        # temp_pred = torchvision.transforms.functional.resize(pred, [s*2 for s in pred.shape[-2:]],torchvision.transforms.InterpolationMode.BILINEAR)
+                        preds.append(pred.cpu().numpy())
                     loss = calculate_objective(pred, mask)
 
             total_loss += loss.item()
-            total_iou += calculate_iou(pred, mask)
-            total_F1 += calculate_f1(pred, mask)[0]
+            total_iou += calculate_iou(pred, mask).item()
+            total_F1 += calculate_f1(pred, mask)[0].item()
         
         if benchmark in ["text_icdar", "maps_icdar"] and (dataloader.dataset.split == "val" or dataloader.dataset.split == "test"):
             import numpy as np
@@ -113,15 +114,36 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                     frame_mask = np.ones((orig_shape[0], orig_shape[1]))*255
                 else:
                     frame_mask = dataloader.dataset.images[i]['frame_mask']
-                PH,PW, H,W, _ = shape
-                image = img.reshape(PH, PW, H, W)
-                image_with_padding = unpatchify(image, (PH*H, PW*W))
-                image_with_frame = image_with_padding[0:orig_shape[0],0:orig_shape[1]]
+                PH, PW, H, W, C = shape  # Number of patches in height & width, patch size, and channels
+                step = H // 4  # Overlapping step size (448//2 = 224)
+
+                # Initialize empty arrays for the recombined image and weight matrix
+                full_image = np.zeros((PH * step + step, PW * step + step))
+                weight_matrix = np.zeros((PH * step + step, PW * step + step))
+
+                # Create a Gaussian weight map for smooth blending
+                y_coords, x_coords = np.meshgrid(np.linspace(-1, 1, H), np.linspace(-1, 1, W), indexing='ij')
+                gaussian_weights = np.exp(-4 * (x_coords**2 + y_coords**2))
+
+                # Reshape patches back into their spatial arrangement
+                image_patches = img.reshape(PH, PW, H, W)
+
+                # Reconstruct the full image by placing patches with Gaussian blending
+                for ph in range(PH):
+                    for pw in range(PW):
+                        y, x = ph * step, pw * step
+                        full_image[y:y+H, x:x+W] += image_patches[ph, pw] * gaussian_weights
+                        weight_matrix[y:y+H, x:x+W] += gaussian_weights  # Smarter weighting
+
+                # Normalize overlapping regions by weighted averaging
+                full_image /= np.maximum(weight_matrix, 1e-8)
+                image_with_frame = full_image[0:orig_shape[0],0:orig_shape[1]]
                 image = image_with_frame * (frame_mask/255)
                 if not os.path.exists(f'out/{benchmark}'):
                     os.makedirs(f'out/{benchmark}')
                 cv2.imwrite(f'out/{benchmark}/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
                 cv2.imwrite(f'out/{benchmark}/{name}_soft.png', (image*255).astype(np.uint8))
+                cv2.imwrite(f'out/{benchmark}/{name}.png', (image*255).astype(np.uint8))
         
         return total_loss/nsamples, total_iou/nsamples, total_F1/nsamples
 
