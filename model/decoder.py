@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch
 
 INPUT_CHANNELS = {
+    'radio_b' : 768,
     'radio_l' : 1024,
     'radio_h' : 1280,
     'dino' : 1024,

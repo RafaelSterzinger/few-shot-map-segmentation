@@ -97,7 +97,7 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
         
         if args.class_name == "icdar" and (dataloader.dataset.split == "val" or dataloader.dataset.split == "test"):
             import numpy as np
-            preds = np.stack(preds, axis=0)
+            preds = np.concatenate(preds, axis=0)
             images = []
             start_idx = dataloader.dataset.start_indices
             for i in range(len(start_idx)-1):
@@ -112,8 +112,8 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                 image_with_padding = unpatchify(image, (PH*H, PW*W))
                 image_with_frame = image_with_padding[0:orig_shape[0],0:orig_shape[1]]
                 image = image_with_frame * (frame_mask/255)
-                cv2.imwrite(f'out/icdar_100/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
-                cv2.imwrite(f'out/icdar_100/{name}_soft.png', (image*255).astype(np.uint8))
+                cv2.imwrite(f'out/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
+                cv2.imwrite(f'out/{name}_soft.png', (image*255).astype(np.uint8))
 
 
 
@@ -164,20 +164,20 @@ def experiment(args):
             best_iou = val_iou
             best_model = copy.deepcopy(model.state_dict())
     
+    torch.save(best_model, f'checkpoint/{args.class_name}_{args.base_model}_{args.adapter}_{args.nshots}_{args.exp_name}.pth')
     model.load_state_dict(best_model)
 
     test_loss, test_iou, test_f1 = run_epoch(model, dl_test, None, None, args.scale_factor, args.save_results)
     wandb.log({"test_loss": test_loss, "test_miou": test_iou, "test_f1": test_f1})
     print(f"TESTING: Loss: {test_loss:.4f}, mIoU: {test_iou:.4f}, F1: {test_f1:.4f}")
 
-    torch.save(best_model, f'checkpoint/{args.class_name}_{args.base_model}_{args.adapter}_{args.nshots}_{args.exp_name}.pth')
     wandb.finish()
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard', 'icdar'], help="Chose railways or vineyards")
+    parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard', 'icdar'])
     parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'dora', 'none'], help="Low-rank adaptation methods")
     parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio_l', 'radio_h', 'apple', 'unet'])
     parser.add_argument("--seed", type=int, default=42)

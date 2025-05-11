@@ -23,18 +23,19 @@ class DatasetICDAR(Dataset):
 
         assert nshots == 1.0
 
-        patch_size = 448
+        scaling = 2
+        patch_size = 224*scaling
         if split == 'train':
             self.augmentations = A.Compose([
                     A.CropNonEmptyMaskIfExists(patch_size, patch_size),
-                    A.Resize(patch_size//2, patch_size//2),
+                    A.Resize(patch_size//scaling, patch_size//scaling),
                     A.D4()
                 ])
         else:
             for i in range(len(self.images)):
                 orig_size = self.images[i]['orig_size']
                 transform = A.Compose([
-                    A.PadIfNeeded(min_height=patch_size*(ceil(orig_size[0]/patch_size)), min_width=patch_size*(ceil(orig_size[1]/patch_size)), border_mode=0),  
+                    A.PadIfNeeded(min_height=patch_size*(ceil(orig_size[0]/patch_size)), min_width=patch_size*(ceil(orig_size[1]/patch_size)), border_mode=0, position='top_left'),  
                 ])
                 new_size = None
                 patch_shape = None
@@ -58,7 +59,7 @@ class DatasetICDAR(Dataset):
                 self.length += len(lst['input'])
 
             self.augmentations = A.Compose([
-                        A.Resize(patch_size//2, patch_size//2),
+                        A.Resize(patch_size//scaling, patch_size//scaling),
                     ])
 
     def global_to_local(self, global_index):
