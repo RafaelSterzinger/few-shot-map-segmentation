@@ -96,6 +96,7 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
             total_F1 += calculate_f1(pred, mask)[0]
         
         if args.class_name == "icdar" and (dataloader.dataset.split == "val" or dataloader.dataset.split == "test"):
+            benchmark = 'icdar'
             import numpy as np
             preds = np.concatenate(preds, axis=0)
             images = []
@@ -107,19 +108,36 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                 shape = dataloader.dataset.images[i]['patch_shape']
                 orig_shape = dataloader.dataset.images[i]['orig_size']
                 frame_mask = dataloader.dataset.images[i]['frame_mask']
-                PH,PW, H,W, _ = shape
-                image = img.reshape(PH, PW, H, W)
-                image_with_padding = unpatchify(image, (PH*H, PW*W))
-                image_with_frame = image_with_padding[0:orig_shape[0],0:orig_shape[1]]
+                PH, PW, H, W, C = shape  # Number of patches in height & width, patch size, and channels
+                step = H // 4  # Overlapping step size (448//2 = 224)
+
+                # Initialize empty arrays for the recombined image and weight matrix
+                full_image = np.zeros((PH * step + step, PW * step + step))
+                weight_matrix = np.zeros((PH * step + step, PW * step + step))
+
+                # Create a Gaussian weight map for smooth blending
+                y_coords, x_coords = np.meshgrid(np.linspace(-1, 1, H), np.linspace(-1, 1, W), indexing='ij')
+                gaussian_weights = np.exp(-4 * (x_coords**2 + y_coords**2))
+
+                # Reshape patches back into their spatial arrangement
+                image_patches = img.reshape(PH, PW, H, W)
+
+                # Reconstruct the full image by placing patches with Gaussian blending
+                for ph in range(PH):
+                    for pw in range(PW):
+                        y, x = ph * step, pw * step
+                        full_image[y:y+H, x:x+W] += image_patches[ph, pw] * gaussian_weights
+                        weight_matrix[y:y+H, x:x+W] += gaussian_weights  # Smarter weighting
+
+                # Normalize overlapping regions by weighted averaging
+                full_image /= np.maximum(weight_matrix, 1e-8)
+                image_with_frame = full_image[0:orig_shape[0],0:orig_shape[1]]
                 image = image_with_frame * (frame_mask/255)
-                cv2.imwrite(f'out/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
-                cv2.imwrite(f'out/{name}_soft.png', (image*255).astype(np.uint8))
-
-
-
-
-            
-            
+                if not os.path.exists(f'out/{benchmark}'):
+                    os.makedirs(f'out/{benchmark}')
+                cv2.imwrite(f'out/{benchmark}/{name}-OUTPUT-PRED.png', ((image>0.5)*255).astype(np.uint8))
+                cv2.imwrite(f'out/{benchmark}/{name}_soft.png', (image*255).astype(np.uint8))
+                cv2.imwrite(f'out/{benchmark}/{name}.png', (image*255).astype(np.uint8))
         
         return total_loss/nsamples, total_iou/nsamples, total_F1/nsamples
 
@@ -141,7 +159,7 @@ def experiment(args):
     param_infos = print_trainable_parameters(model)
     wandb.config.update(param_infos)
 
-    dl_train, dl_val, dl_test = build_dataloader(args, preprocessor, args.mixup, args.cutmix)
+    dl_train, dl_val, dl_test = build_dataloader(args, preprocessor)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr/10, betas=(0.9, 0.999), weight_decay=0.01)
 
     # One-Cycle LR scheduler
@@ -183,8 +201,6 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--exp_name", type=str, default='')
     parser.add_argument("--nshots", default=1.0)
-    parser.add_argument('--mixup', action='store_true')
-    parser.add_argument('--cutmix', action='store_true')
     parser.add_argument('--save_results', action='store_true')
     parser.add_argument("--scale_factor", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=300, help="Number of training epochs")

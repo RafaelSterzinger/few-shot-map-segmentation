@@ -10,37 +10,8 @@ from data.map_icdar import DatasetICDAR
 from data.map_siegfried import DatasetSiegfried
 from torch.utils.data import default_collate
 
-def build_dataloader(args, transformer, use_mixup=False, use_cutmix=False):
+def build_dataloader(args, transformer):
         dataloaders = [] 
-
-        cutmix = CutMix(num_classes=1)
-        mixup = MixUp(num_classes=1)
-
-        def collate_fn(batch):
-            B = batch.__len__()
-            temp = default_collate(batch)
-            # temp[0]==image, temp[1]==label
-            temp = [temp['img'], temp['mask'].unsqueeze(1)]
-            # stack image and labels on the channel dim, i.e. gt map
-            results=[]
-            stack = torch.cat(temp, dim=1)
-            results.append(stack)
-            if use_mixup:       
-                results.append(mixup(
-                stack, torch.zeros(stack.shape[0], dtype=int))[0])
-            if use_cutmix:
-
-                results.append(cutmix(
-                stack, torch.zeros(stack.shape[0], dtype=int))[0])
-            
-            output = torch.stack([random.choice(results)[i] for i in range(B)], dim=0)
-
-            # split image and labels again
-            batched = {
-                   'img':output[:, 0:-1],
-                   'mask':(output[:, -1:].squeeze(1) > 0).float()
-            }
-            return batched
 
         for split in ['train', 'val', 'test']:
                 if args.class_name == 'icdar':
