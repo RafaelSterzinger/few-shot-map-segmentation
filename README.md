@@ -10,6 +10,7 @@ As rich sources of history, maps provide crucial insights into historical change
 
 <p align="center">
   <img src="orig_pca.png" width="25%" />
+  
   <img src="radio_pca.png" width="25%" />
   <br>
   <em>Figure: An illustration of the first three principal components of RADIO-H feature embeddings of a map of Paris: despite no prior training in this specialized domain, meaningful classes have already emerged: landmarks, building blocks, streets, and street names are clearly distinguishable.</em>
@@ -25,7 +26,6 @@ The approach follows a three-stage adaptation process:
 2. **📐 Upscale**: Rescale embeddings back to the original image resolution.  
 3. **🎯 Classify**: Apply a linear pixel-wise classifier to obtain segmentation masks.  
 
----
 
 ## 💻 Usage
 
@@ -39,7 +39,8 @@ python run.py --class_name $class_name --base_model radio_l --nshots 5 --scale_f
 python run.py --class_name $class_name --base_model unet --nshots 5 --epochs 100 --scale_factor 1 --exp_name reproduce_baseline
 ```
 
-### 📚 Citation
+## 📚 Citation
+
 ```bash
 @InProceedings{few-shot2025sterzinger,
       author="Sterzinger, Rafael and Peer, Marco and Sablatnig, Robert",
