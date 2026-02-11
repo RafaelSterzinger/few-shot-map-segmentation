@@ -9,33 +9,34 @@ import albumentations as A
 
 from data.map_siegfried import DatasetSiegfried
 
+SCALING = 2
+SIZE = 224*SCALING
 
 class DatasetICDAR(Dataset):
-    def __init__(self, datapath, transform, split, nshots = 1.0, is_unet=False):
+    def __init__(self, datapath, transform, split, nshots = 1.0, is_baseline=False):
         print('Loading data from %s' % datapath)
         self.split = split
         self.benchmark = 'maps_icdar'
         self.base_path = datapath
         self.transform = transform
-        self.is_unet = is_unet
+        self.is_baseline = is_baseline
         self.images = self.load_images(self.split)
 
 
         assert nshots == 1.0
 
-        scaling = 2
-        patch_size = 224*scaling
         if split == 'train':
             self.augmentations = A.Compose([
-                    A.CropNonEmptyMaskIfExists(patch_size, patch_size),
-                    A.Resize(patch_size//scaling, patch_size//scaling),
+                    A.CropNonEmptyMaskIfExists(SIZE, SIZE),
+                    A.Resize(SIZE//SCALING, SIZE//SCALING),
                     A.D4()
                 ])
         else:
+            STEP = SIZE//2
             for i in range(len(self.images)):
                 orig_size = self.images[i]['orig_size']
                 transform = A.Compose([
-                    A.PadIfNeeded(min_height=patch_size*(ceil(orig_size[0]/patch_size)), min_width=patch_size*(ceil(orig_size[1]/patch_size)), border_mode=0, position='top_left'),  
+                    A.PadIfNeeded(min_height=STEP*(ceil(orig_size[0]/STEP)), min_width=STEP*(ceil(orig_size[1]/STEP)), border_mode=0, position='top_left'),  
                 ])
                 new_size = None
                 patch_shape = None
@@ -45,7 +46,7 @@ class DatasetICDAR(Dataset):
                     value = transform(image=value)['image']
                     if new_size is None:
                         new_size = value.shape
-                    self.images[i][key] = patchify(value, (patch_size,patch_size, 3) if key == 'input' else (patch_size,patch_size), step=patch_size)
+                    self.images[i][key] = patchify(value, (SIZE,SIZE, 3) if key == 'input' else (SIZE,SIZE), step=STEP)
                     shape = self.images[i][key].squeeze().shape
                     if patch_shape is None:
                         patch_shape = shape
@@ -59,7 +60,7 @@ class DatasetICDAR(Dataset):
                 self.length += len(lst['input'])
 
             self.augmentations = A.Compose([
-                        A.Resize(patch_size//scaling, patch_size//scaling),
+                        A.Resize(SIZE//SCALING, SIZE//SCALING),
                     ])
 
     def global_to_local(self, global_index):
@@ -76,7 +77,7 @@ class DatasetICDAR(Dataset):
     def __getitem__(self, idx):
         image, mask, name = self.load_frame(idx)
 
-        if self.is_unet:
+        if self.is_baseline:
             image = self.transform(image)
         else:
             image = self.transform(image)['pixel_values'][0]

@@ -45,10 +45,6 @@ def calculate_objective(pred, target):
             intersection = (pred.flatten() * target.flatten()).sum()
             dice_loss = 1 - (2. * intersection + EPS) / (pred.flatten().sum() + target.flatten().sum() + EPS)
 
-            # Compute BCE Loss
-            # bce_loss = F.binary_cross_entropy(pred, target)
-            # lambda_weight = 0.2
-
             _focal_loss = focal_loss(pred, target, alpha=0.25, gamma=2.0, reduction='mean')
 
             # Combine both losses
@@ -106,7 +102,7 @@ def to_cuda(batch):
     return batch
 
 def log_info(args):
-    print('\n:=========== Few-shot Seg. with VRP-SAM ===========')
+    print('\n:=========== Few-Shot Seg. ===========')
     for arg_key in args.__dict__:
         print('| %20s: %-24s' % (arg_key, str(args.__dict__[arg_key])))
     print(':==================================================\n')
@@ -126,20 +122,3 @@ def print_trainable_parameters(model):
     )
     
     return {'trainable': trainable_params, 'all': all_param, 'trainable%': 100 * trainable_params / all_param}
-
-class EarlyStopping:
-    def __init__(self, patience=5, min_delta=0.005):
-        self.patience = patience
-        self.min_delta = min_delta
-        self.best_score = None
-        self.counter = 0
-
-    def __call__(self, val_score):
-        if self.best_score is None or val_score > self.best_score + self.min_delta:
-            self.best_score = val_score
-            self.counter = 0  # Reset counter
-        else:
-            self.counter += 1
-            if self.counter >= self.patience:
-                return True  # Trigger early stopping
-        return False

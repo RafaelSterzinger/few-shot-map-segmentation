@@ -10,18 +10,19 @@ import torch
 import torch.optim as optim
 import torchvision
 import torchvision.transforms.functional
-from segmentation_models_pytorch import Unet
+from segmentation_models_pytorch import Unet, DeepLabV3Plus, Segformer, PSPNet
 from torchvision import transforms
 from tqdm import tqdm
 from transformers import AutoImageProcessor
 from data.dataset import build_dataloader
 from model.encoder import get_lora_model
 from model.decoder import SegmentationHead
-from patchify import unpatchify
 import wandb
 import argparse
 
-from util import calculate_iou, calculate_objective, fix_randseed, log_info, print_trainable_parameters, to_cuda, calculate_f1, EarlyStopping
+from util import calculate_iou, calculate_objective, fix_randseed, log_info, print_trainable_parameters, to_cuda, calculate_f1
+
+from data.map_icdar import SIZE
 
 BASE_MODEL_DICT = {
     'dino' : 'facebook/dinov2-large',
@@ -46,9 +47,15 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
             model.eval()  # Set model to evaluation mode
 
         f = None
-        if type(model) is Unet:
+        is_baseline = type(model) is Unet or type(model) is DeepLabV3Plus or type(model) is Segformer or type(model) is PSPNet
+
+        if is_baseline:
                 f = model
-                model = lambda x: f(x).squeeze(1)
+                if type(model) is DeepLabV3Plus:
+                        model = lambda x: f(x.repeat((2,1,1,1)))[0:1].squeeze(1) if x.shape[0] == 1 else f(x).squeeze(1)
+                else:
+                    model = lambda x: f(x).squeeze(1)
+
 
 
         # Loop over the current dataloader
@@ -72,7 +79,7 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                 loss = calculate_objective(pred, mask)
                 loss.backward()
 
-                if type(f) is Unet:
+                if is_baseline:
                     torch.nn.utils.clip_grad_norm_(f.parameters(), max_norm=1.0)  
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  
@@ -87,8 +94,8 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                         for i in range(img.shape[0]):
                             torchvision.utils.save_image((pred[i]>=0.5).float(), f'out/{batch["name"][i]}_{args.nshots}_pred.png')
                     if args.class_name == "icdar":
-                        temp_pred = torchvision.transforms.functional.resize(pred, [s*2 for s in pred.shape[-2:]],torchvision.transforms.InterpolationMode.BILINEAR)
-                        preds.append(temp_pred.cpu().numpy())
+                        resized_pred = torchvision.transforms.functional.resize(pred, (SIZE,SIZE), torchvision.transforms.InterpolationMode.BILINEAR)
+                        preds.append(resized_pred.cpu().numpy())
                     loss = calculate_objective(pred, mask)
 
             total_loss += loss.item()
@@ -109,7 +116,7 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
                 orig_shape = dataloader.dataset.images[i]['orig_size']
                 frame_mask = dataloader.dataset.images[i]['frame_mask']
                 PH, PW, H, W, C = shape  # Number of patches in height & width, patch size, and channels
-                step = H // 4  # Overlapping step size (448//2 = 224)
+                step = H // 2  # Overlapping step size (448//2 = 224)
 
                 # Initialize empty arrays for the recombined image and weight matrix
                 full_image = np.zeros((PH * step + step, PW * step + step))
@@ -142,13 +149,21 @@ def run_epoch(model, dataloader, optimizer, scheduler, scale_factor = 1, save_re
         return total_loss/nsamples, total_iou/nsamples, total_F1/nsamples
 
 def experiment(args):
-    if 'unet' not in args.base_model:
+    if  args.base_model not in ['unet', 'deeplab', 'segformer', 'pspnet']:
         base_model_path = BASE_MODEL_DICT[args.base_model]
         base_model = get_lora_model(base_model_path, args.adapter, type(args.nshots) is int)
         model = SegmentationHead(base_model, args.base_model).cuda()
         preprocessor = AutoImageProcessor.from_pretrained(base_model_path)
     else:
-        model = Unet(encoder_name="resnet50", encoder_weights="imagenet", classes=1, activation="sigmoid").cuda()
+        # https://github.com/qubvel-org/segmentation_models.pytorch?tab=readme-ov-file#api
+        if args.base_model == 'unet':
+            model = Unet(encoder_name="resnet50", encoder_weights="imagenet", classes=1, activation="sigmoid").cuda()
+        if args.base_model == 'deeplab':
+            model = DeepLabV3Plus(encoder_name="resnet50", encoder_weights="imagenet", classes=1, activation="sigmoid").cuda()
+        if args.base_model == 'segformer':
+            model = Segformer(encoder_name="mit_b5", encoder_weights="imagenet", classes=1, activation="sigmoid").cuda()
+        if args.base_model == 'pspnet':
+            model = PSPNet(encoder_name="resnet50", encoder_weights="imagenet", classes=1, activation="sigmoid").cuda()
         preprocessor = transforms.Compose([
         transforms.ToTensor(),                  
         transforms.Normalize(
@@ -197,7 +212,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--class_name", type=str, choices=['railway', 'vineyard', 'icdar'])
     parser.add_argument("--adapter", type=str, default='none', choices=['lora', 'lokr', 'loha', 'dora', 'none'], help="Low-rank adaptation methods")
-    parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio_l', 'radio_h', 'apple', 'unet'])
+    parser.add_argument("--base_model", type=str, choices=['dino', 'sam', 'radio_l', 'radio_h', 'apple', 'unet', 'deeplab', 'segformer'])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--exp_name", type=str, default='')
     parser.add_argument("--nshots", default=1.0)
